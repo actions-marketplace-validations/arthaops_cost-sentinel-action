@@ -1,0 +1,62 @@
+name: "ArthaOps Cost Sentinel"
+description: "Continuous Pull Request cloud infrastructure cost diffs and policy gating powered by ArthaOps."
+author: "ArthaOps Inc."
+
+branding:
+  icon: "dollar-sign"
+  color: "blue"
+
+inputs:
+  plan_path:
+    description: "Path to the Terraform plan JSON file (e.g. tfplan.json). If omitted, runs in demonstration audit mode."
+    required: false
+    default: ""
+  threshold_monthly_usd:
+    description: "Maximum allowable net monthly cost increase in USD before failing the workflow gate."
+    required: false
+    default: ""
+  post_pr_comment:
+    description: "Whether to post a formatted summary table as a comment on the Pull Request."
+    required: false
+    default: "true"
+  github_token:
+    description: "GitHub token used for posting PR comments."
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  total_monthly_diff:
+    description: "Calculated net monthly infrastructure cost difference in USD."
+    value: ${{ steps.analyze.outputs.total_monthly_diff }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Run ArthaOps Cost Diff Engine
+      id: analyze
+      shell: bash
+      env:
+        INPUT_PLAN_PATH: ${{ inputs.plan_path }}
+        INPUT_THRESHOLD_MONTHLY_USD: ${{ inputs.threshold_monthly_usd }}
+      run: |
+        python3 ${{ github.action_path }}/scripts/analyze_cost.py > /tmp/arthaops_cost_report.md
+
+    - name: Post PR Comment
+      if: inputs.post_pr_comment == 'true' && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('/tmp/arthaops_cost_report.md', 'utf8');
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: report
+          });
